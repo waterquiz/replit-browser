@@ -57,6 +57,8 @@ DEFAULT_URL="${BROWSER_URL:-https://www.google.com}"
 echo "[3/5] Launching Chromium at ${DEFAULT_URL}..."
 chromium \
     --no-sandbox \
+    --test-type \
+    --disable-infobars \
     --disable-dev-shm-usage \
     --disable-software-rasterizer \
     --start-maximized \
