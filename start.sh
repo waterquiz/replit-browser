@@ -7,7 +7,7 @@ RESOLUTION="1280x720x24"
 VNC_PORT=5900
 NOVNC_PORT=5901
 VNC_PASSWORD="${VNC_PASSWORD:-}"
-NOVNC_DIR="$(dirname "$0")/novnc"
+NOVNC_DIR="$(dirname "$0")"
 
 echo "=== Starting Browser Desktop ==="
 echo "VNC internal port: ${VNC_PORT}"
