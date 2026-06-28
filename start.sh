@@ -47,9 +47,32 @@ done
 
 export DISPLAY="${DISPLAY}"
 
-# 2. Start window manager
+# 2. Start window manager with no decorations / auto-maximize
 echo "[2/5] Starting openbox..."
-openbox &
+mkdir -p /tmp/ob-config
+cat > /tmp/ob-config/rc.xml << 'OBEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc"
+                xmlns:xi="http://www.w3.org/2001/XInclude">
+  <resistance><strength>10</strength><screen_edge_strength>20</screen_edge_strength></resistance>
+  <focus><focusNew>yes</focusNew><followMouse>no</followMouse><focusLast>yes</focusLast><underMouse>no</underMouse><focusDelay>200</focusDelay><raiseOnFocus>no</raiseOnFocus></focus>
+  <placement><policy>Smart</policy><center>yes</center><monitor>Primary</monitor><primaryMonitor>1</primaryMonitor></placement>
+  <theme><name>Clearlooks</name><titleLayout>NLIMC</titleLayout><keepBorder>no</keepBorder><animateIconify>no</animateIconify><font place="ActiveWindow"><name>sans</name><size>8</size><weight>bold</weight><slant>normal</slant></font><font place="InactiveWindow"><name>sans</name><size>8</size><weight>bold</weight><slant>normal</slant></font><font place="MenuHeader"><name>sans</name><size>9</size><weight>normal</weight><slant>normal</slant></font><font place="MenuItem"><name>sans</name><size>9</size><weight>normal</weight><slant>normal</slant></font><font place="OnScreenDisplay"><name>sans</name><size>9</size><weight>bold</weight><slant>normal</slant></font></theme>
+  <desktops><number>1</number><firstdesk>1</firstdesk><popupTime>875</popupTime></desktops>
+  <resize><drawContents>yes</drawContents><popupShow>Nonpixel</popupShow><popupPosition>Center</popupPosition><popupFixedPosition><x>10</x><y>10</y></popupFixedPosition></resize>
+  <keyboard></keyboard>
+  <mouse></mouse>
+  <menu><hideDelay>200</hideDelay><middle>no</middle><submenuShowDelay>100</submenuShowDelay><submenuHideDelay>400</submenuHideDelay><applicationIcons>yes</applicationIcons><manageDesktops>yes</manageDesktops></menu>
+  <dock><position>Bottom</position><floatingX>0</floatingX><floatingY>0</floatingY><noStrut>no</noStrut><stacking>Above</stacking><direction>Vertical</direction><autoHide>no</autoHide><hideDelay>300</hideDelay><showDelay>300</showDelay><moveButton>Middle</moveButton></dock>
+  <applications>
+    <application name="*">
+      <decor>no</decor>
+      <maximized>true</maximized>
+    </application>
+  </applications>
+</openbox_config>
+OBEOF
+openbox --config-file /tmp/ob-config/rc.xml &
 sleep 1
 
 # 3. Launch Chromium with the default URL
