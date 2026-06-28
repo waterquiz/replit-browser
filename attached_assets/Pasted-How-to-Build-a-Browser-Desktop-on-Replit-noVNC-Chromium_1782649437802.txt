@@ -1,0 +1,244 @@
+How to Build a Browser Desktop on Replit (noVNC + Chromium)
+This guide walks you through building a web-accessible browser desktop — a full Chromium browser running inside a virtual display, accessible from any web browser via noVNC. No Docker required.
+
+What You're Building
+Your Browser
+    └── noVNC (web client on port 5000)
+            └── WebSocket → x11vnc (VNC server on port 5900)
+                    └── Virtual Display (Xvfb)
+                            ├── Openbox (window manager)
+                            └── Chromium (browser)
+
+The user opens your Replit app URL, clicks Connect, and gets a fully interactive browser desktop inside their browser tab.
+
+Step 1 — Create a New Replit Project
+Go to replit.com and click + Create Repl
+Choose Bash or Nix as the template
+Give it a name (e.g. browser-desktop)
+Step 2 — Install System Dependencies
+Open the Shell tab and use Replit's built-in Nix package system. You do not use apt or docker — Replit uses NixOS.
+
+In the agent chat (or by editing replit.nix), install these packages:
+
+Package	Purpose
+xorg.xorgserver	Provides the Xvfb virtual display binary
+xvfb-run	Helper wrapper for Xvfb
+x11vnc	VNC server that captures the virtual display
+chromium	The browser to run inside the desktop
+openbox	Lightweight window manager
+xdotool	X11 automation (optional but useful)
+python3	Required by websockify
+python312Packages.websockify	WebSocket-to-TCP bridge for noVNC
+Using Replit Agent: Simply say:
+
+"Install xorg.xorgserver, xvfb-run, x11vnc, chromium, openbox, python3, python312Packages.websockify as system dependencies"
+
+Step 3 — Download noVNC
+noVNC is the browser-side VNC client (HTML/JS). Download it into your project:
+
+mkdir -p novnc
+curl -sL -o /tmp/novnc.tar.gz \
+  https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz
+tar xzf /tmp/novnc.tar.gz -C novnc --strip-components=1
+
+This creates a novnc/ folder containing vnc.html — the web UI users will open.
+
+Step 4 — Create the Startup Script
+Create a file called start.sh in your project root:
+
+#!/bin/bash
+set -e
+DISPLAY_NUM=99
+DISPLAY=":${DISPLAY_NUM}"
+RESOLUTION="1280x720x24"
+VNC_PORT=5900
+WEB_PORT="${PORT:-5000}"
+VNC_PASSWORD="${VNC_PASSWORD:-}"
+NOVNC_DIR="$(dirname "$0")/novnc"
+echo "=== Starting Browser Desktop ==="
+echo "Web port: $WEB_PORT"
+# Clean up on exit
+cleanup() {
+    pkill -f "Xvfb :${DISPLAY_NUM}" 2>/dev/null || true
+    pkill -f x11vnc 2>/dev/null || true
+    pkill -f websockify 2>/dev/null || true
+    pkill -f chromium 2>/dev/null || true
+    pkill -f openbox 2>/dev/null || true
+}
+trap cleanup EXIT
+# Kill any leftover Xvfb from previous runs
+pkill -f "Xvfb :${DISPLAY_NUM}" 2>/dev/null || true
+sleep 1
+# 1. Start the virtual display
+echo "Starting Xvfb on ${DISPLAY}..."
+Xvfb "${DISPLAY}" -screen 0 "${RESOLUTION}" -ac +extension GLX +render -noreset &
+sleep 3
+# Wait for display to be ready
+for i in 1 2 3 4 5; do
+    if DISPLAY="${DISPLAY}" xdpyinfo >/dev/null 2>&1; then
+        echo "X display ready!"
+        break
+    fi
+    echo "Waiting for X display... attempt $i"
+    sleep 2
+done
+export DISPLAY="${DISPLAY}"
+# 2. Start window manager
+echo "Starting openbox window manager..."
+openbox &
+sleep 1
+# 3. Launch Chromium
+echo "Launching Chromium..."
+chromium \
+    --no-sandbox \
+    --disable-dev-shm-usage \
+    --disable-software-rasterizer \
+    --start-maximized \
+    --no-first-run \
+    --disable-translate \
+    --disable-notifications \
+    --disable-default-apps \
+    --window-size=1280,720 \
+    https://www.google.com &
+sleep 3
+# 4. Start VNC server
+echo "Starting x11vnc..."
+if [ -n "$VNC_PASSWORD" ]; then
+    x11vnc -display "${DISPLAY}" -rfbport "${VNC_PORT}" \
+        -passwd "${VNC_PASSWORD}" -forever -shared -bg \
+        -o /tmp/x11vnc.log 2>/dev/null
+else
+    x11vnc -display "${DISPLAY}" -rfbport "${VNC_PORT}" \
+        -nopw -forever -shared -bg \
+        -o /tmp/x11vnc.log 2>/dev/null
+fi
+sleep 2
+# 5. Start noVNC web server
+echo "Starting noVNC on port ${WEB_PORT}..."
+websockify --web "${NOVNC_DIR}" "${WEB_PORT}" "localhost:${VNC_PORT}" &
+echo ""
+echo "=== Desktop ready! ==="
+echo "Open the preview and go to /vnc.html to connect"
+wait
+
+Make it executable:
+
+chmod +x start.sh
+
+Step 5 — Configure the Workflow
+Tell Replit to run start.sh as the main process and expose port 5000:
+
+Using Replit Agent: Say:
+
+"Configure a workflow named 'Start application' that runs bash start.sh, waits for port 5000, with webview output type"
+
+Or manually in .replit:
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash start.sh"
+waitForPort = 5000
+[workflows.workflow.metadata]
+outputType = "webview"
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+Step 6 — Configure Deployment (for Publishing)
+Before publishing, set the deployment target. In the agent chat:
+
+"Configure deployment as vm type with run command bash start.sh"
+
+This sets it as an always-on VM — required because this app needs to keep running continuously (unlike a stateless API).
+
+Step 7 — Access the Desktop
+Start the workflow (or click Run)
+Open the preview URL
+Navigate to /vnc.html
+Click Connect
+You'll see the live Chromium browser desktop!
+Customization
+Change the default URL Chromium opens
+In start.sh, replace https://www.google.com with any URL:
+
+    https://www.espn.com &
+
+Add VNC password protection
+Set an environment variable VNC_PASSWORD in Replit's Secrets tab:
+
+Key: VNC_PASSWORD
+Value: your password
+The start.sh already checks for this variable and applies it automatically.
+
+Change screen resolution
+Edit the RESOLUTION variable at the top of start.sh:
+
+RESOLUTION="1920x1080x24"   # Full HD
+RESOLUTION="1280x720x24"    # HD (default)
+RESOLUTION="800x600x24"     # Small
+
+Change the window manager
+Replace openbox with another lightweight WM:
+
+openbox — minimal, recommended
+fluxbox — slightly more featured (install pkgs.fluxbox)
+xfce4 — full desktop environment (heavier, install pkgs.xfce.xfce4-session)
+Force Chromium flags
+Add more flags to the Chromium launch command:
+
+chromium \
+    --no-sandbox \
+    --disable-dev-shm-usage \
+    --kiosk \                    # Full-screen kiosk mode
+    --disable-infobars \
+    https://yoursite.com &
+
+Troubleshooting
+Problem	Fix
+Black screen after connecting	Chromium or openbox didn't start — check the workflow logs
+"Connection refused"	websockify isn't running; Xvfb may have failed to start
+dbus errors in logs	Normal — no system dbus in Replit sandbox; safe to ignore
+Slow / laggy desktop	Lower the resolution in RESOLUTION variable
+Port already in use	Kill existing processes: pkill -f Xvfb; pkill -f x11vnc
+"Invalid run command" on publish	Set deployment config via Agent or deployConfig({ deploymentTarget: "vm", run: ["bash", "start.sh"] })
+How It Works (Architecture Detail)
+Browser tab
+  │
+  │  HTTP + WebSocket (port 5000)
+  ▼
+websockify
+  │  (bridges WebSocket ↔ raw TCP)
+  │  TCP (port 5900)
+  ▼
+x11vnc
+  │  (reads pixel data from X display)
+  │  UNIX socket / X11 protocol
+  ▼
+Xvfb :99
+  │  (virtual framebuffer — no physical screen)
+  │
+  ├── openbox (window manager — handles window decorations)
+  └── chromium (renders web content into the framebuffer)
+
+noVNC in the browser receives the VNC pixel stream and renders it on an HTML <canvas> element, forwarding mouse/keyboard events back through the same WebSocket connection.
+
+File Structure
+your-project/
+├── start.sh          ← Main startup script
+├── novnc/            ← noVNC web client (downloaded from GitHub)
+│   ├── vnc.html      ← The page users open
+│   ├── core/         ← noVNC JS library
+│   └── ...
+├── replit.nix        ← Nix system packages (managed by Replit)
+└── .replit           ← Workflow and deployment config
+
+Publishing Checklist
+ start.sh is executable (chmod +x start.sh)
+ novnc/ folder exists with vnc.html inside
+ Workflow runs without errors (check logs)
+ Preview shows noVNC connect screen at /vnc.html
+ Deployment configured as vm with run: ["bash", "start.sh"]
+ Click Publish in Replit UI to go live

@@ -1,45 +1,67 @@
-# [Project name]
+# Browser Desktop
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A browser-in-a-browser: a full Chromium session running in a virtual display, streamed live to any browser tab via noVNC over WebSocket.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- **Web UI** — `pnpm --filter @workspace/browser-desktop run dev` (port 20788, preview path `/`)
+- **Desktop backend** — `bash /home/runner/workspace/start.sh` (starts Xvfb → Openbox → Chromium → x11vnc → websockify on port 5901)
+- Both services start automatically when the project runs (via `artifacts/browser-desktop: web` and `artifacts/browser-desktop: novnc` workflows)
+
+## Architecture
+
+```
+Browser tab → / (React UI) → Connect → iframe: /novnc/vnc.html
+                                                       │
+Browser tab → /novnc (websockify on :5901)
+                    │  WebSocket bridge
+                    ▼
+                x11vnc (:5900)
+                    │  VNC protocol
+                    ▼
+              Xvfb :99  (1280×720 virtual display)
+                ├── openbox  (window manager)
+                └── chromium (browser)
+```
+
+## Customization
+
+- **Default URL**: Set `BROWSER_URL` env var (default: `https://www.google.com`)
+- **VNC password**: Set `VNC_PASSWORD` env var in Replit Secrets
+- **Screen resolution**: Edit `RESOLUTION` in `start.sh`
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- React + Vite (web UI)
+- noVNC v1.4.0 (browser VNC client, in `novnc/`)
+- websockify (WebSocket → TCP VNC bridge)
+- x11vnc + Xvfb (virtual display + VNC server)
+- Chromium + Openbox (browser + window manager)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `start.sh` — main desktop startup script
+- `novnc/` — noVNC static web client
+- `artifacts/browser-desktop/` — React web app (landing + iframe)
+- `artifacts/api-server/` — Express API server (health check)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Two services in one artifact: `web` (React UI at `/`) and `novnc` (websockify at `/novnc`) — allows a polished landing page while the VNC client is served separately
+- websockify port (5901) is internal; the Replit path proxy routes `/novnc` traffic to it
+- noVNC `path=novnc/` param tells it to connect WebSocket to `/novnc/` — matches the proxy route
+- dbus errors in logs are expected/harmless in Replit's NixOS sandbox
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Users open the app, click "Connect to Desktop", and get an interactive Chromium browser running in their browser tab.
+
+## Gotchas
+
+- The `novnc` workflow must be running for the desktop to be accessible
+- dbus/D-Bus errors in the novnc workflow logs are normal — Chromium still works
+- `start.sh` uses absolute path in artifact.toml because the workflow working directory is the artifact folder, not the workspace root
 
 ## User preferences
 
 _Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
