@@ -8,6 +8,11 @@ VNC_PORT=5900
 NOVNC_PORT=5901
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 NOVNC_DIR="$(dirname "$0")"
+WORKSPACE_DIR="$(cd "$(dirname "$0")" && pwd)"
+CHROME_PROFILE="${WORKSPACE_DIR}/chrome-profile"
+EXT_DIR="${WORKSPACE_DIR}/extensions/violentmonkey"
+ENABLER_DIR="${WORKSPACE_DIR}/extensions/enabler"
+EXT_ID="ababaaaiajabagagaeacabamakajaoam"
 
 echo "=== Starting Browser Desktop ==="
 echo "VNC internal port: ${VNC_PORT}"
@@ -75,9 +80,50 @@ OBEOF
 openbox --config-file /tmp/ob-config/rc.xml &
 sleep 1
 
-# 3. Launch Chromium with the default URL
+# 3. Pre-seed Chrome profile (developer mode + extension pin)
+echo "[3/6] Setting up Chrome profile..."
+if [ ! -d "${CHROME_PROFILE}/Default" ]; then
+    mkdir -p "${CHROME_PROFILE}/Default"
+    python3 - "${CHROME_PROFILE}/Default/Preferences" "${EXT_ID}" << 'PYEOF'
+import json, sys
+prefs_path, ext_id = sys.argv[1], sys.argv[2]
+prefs = {
+    "extensions": {
+        "ui": {"developer_mode": True},
+        "settings": {
+            ext_id: {
+                "state": 1,
+                "is_pinned": True,
+                "location": 4
+            }
+        }
+    }
+}
+with open(prefs_path, "w") as f:
+    json.dump(prefs, f, indent=2)
+print(f"Profile pre-seeded at {prefs_path}")
+PYEOF
+else
+    # Ensure developer mode stays on in existing profile
+    python3 - "${CHROME_PROFILE}/Default/Preferences" "${EXT_ID}" << 'PYEOF'
+import json, sys
+prefs_path, ext_id = sys.argv[1], sys.argv[2]
+try:
+    with open(prefs_path) as f:
+        prefs = json.load(f)
+except Exception:
+    prefs = {}
+prefs.setdefault("extensions", {}).setdefault("ui", {})["developer_mode"] = True
+prefs["extensions"].setdefault("settings", {}).setdefault(ext_id, {})["is_pinned"] = True
+with open(prefs_path, "w") as f:
+    json.dump(prefs, f, indent=2)
+print("Developer mode enforced in existing profile")
+PYEOF
+fi
+
+# 4. Launch Chromium with the default URL
+echo "[4/6] Launching Chromium..."
 DEFAULT_URL="${BROWSER_URL:-https://www.google.com}"
-echo "[3/5] Launching Chromium at ${DEFAULT_URL}..."
 chromium \
     --no-sandbox \
     --test-type \
@@ -90,11 +136,76 @@ chromium \
     --disable-notifications \
     --disable-default-apps \
     --window-size=1280,720 \
+    --user-data-dir="${CHROME_PROFILE}" \
+    --load-extension="${EXT_DIR},${ENABLER_DIR}" \
+    --allow-legacy-mv2-extensions \
+    --enable-features=AllowLegacyMV2Extensions \
+    --disable-features=ExtensionManifestV2Disabled,ExtensionManifestV2Unsupported \
     "${DEFAULT_URL}" &
-sleep 3
+sleep 5
 
-# 4. Start VNC server
-echo "[4/5] Starting x11vnc on port ${VNC_PORT}..."
+# Force-enable the extension via xdotool if Chrome disables it
+(
+  sleep 6
+  # Find the actual extension ID Chrome assigned
+  ACTUAL_EXT_ID=$(python3 -c "
+import json, glob, os
+profile_dir = '${CHROME_PROFILE}/Default'
+ext_dir = os.path.join(profile_dir, 'Extensions')
+if os.path.exists(ext_dir):
+    ids = [d for d in os.listdir(ext_dir) if len(d) == 32]
+    # Filter to our loaded extension (not Chrome built-ins)
+    for eid in ids:
+        prefs_path = os.path.join(profile_dir, 'Preferences')
+        try:
+            with open(prefs_path) as f:
+                p = json.load(f)
+            s = p.get('extensions', {}).get('settings', {}).get(eid, {})
+            name = s.get('manifest', {}).get('name', '')
+            if 'monkey' in name.lower() or 'violent' in name.lower():
+                print(eid)
+                break
+        except:
+            pass
+" 2>/dev/null)
+
+  if [ -n "\$ACTUAL_EXT_ID" ]; then
+    echo "Detected extension ID: \$ACTUAL_EXT_ID"
+    # Navigate to chrome://extensions and enable the extension
+    DISPLAY="${DISPLAY}" xdotool key ctrl+t
+    sleep 1
+    DISPLAY="${DISPLAY}" xdotool type --clearmodifiers "chrome://extensions/"
+    DISPLAY="${DISPLAY}" xdotool key Return
+    sleep 2
+    # Re-write preferences to force-enable (Chrome reads on next restart)
+    python3 - "${CHROME_PROFILE}/Default/Preferences" "\$ACTUAL_EXT_ID" << 'PYEOF'
+import json, sys
+prefs_path, ext_id = sys.argv[1], sys.argv[2]
+try:
+    with open(prefs_path) as f:
+        prefs = json.load(f)
+except:
+    sys.exit(0)
+s = prefs.get('extensions', {}).get('settings', {}).get(ext_id, {})
+if s.get('state') == 0 or s.get('disable_reasons'):
+    s['state'] = 1
+    s['disable_reasons'] = 0
+    s['is_pinned'] = True
+    prefs['extensions']['settings'][ext_id] = s
+    prefs.setdefault('extensions', {}).setdefault('ui', {})['developer_mode'] = True
+    with open(prefs_path, 'w') as f:
+        json.dump(prefs, f, indent=2)
+    print(f"Force-enabled extension {ext_id} in preferences")
+PYEOF
+    # Close the tab we opened
+    DISPLAY="${DISPLAY}" xdotool key ctrl+w
+  else
+    echo "Extension ID not detected in profile yet"
+  fi
+) &
+
+# 5. Start VNC server
+echo "[5/6] Starting x11vnc on port ${VNC_PORT}..."
 if [ -n "$VNC_PASSWORD" ]; then
     x11vnc -display "${DISPLAY}" -rfbport "${VNC_PORT}" \
         -passwd "${VNC_PASSWORD}" -forever -shared -bg \
@@ -106,8 +217,8 @@ else
 fi
 sleep 2
 
-# 5. Start noVNC/websockify on dedicated port
-echo "[5/5] Starting noVNC websockify on port ${NOVNC_PORT}..."
+# 6. Start noVNC/websockify on dedicated port
+echo "[6/6] Starting noVNC websockify on port ${NOVNC_PORT}..."
 websockify --web "${NOVNC_DIR}" "${NOVNC_PORT}" "localhost:${VNC_PORT}" &
 
 echo ""
