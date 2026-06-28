@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from "react";
 type ConnectionState = "idle" | "connecting" | "connected" | "error";
 
 export default function DesktopPage() {
-  const [state, setState] = useState<ConnectionState>("idle");
+  const [state, setState] = useState<ConnectionState>("connected");
   const [fullscreen, setFullscreen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
