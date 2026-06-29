@@ -40,4 +40,7 @@ kind = "web"
 
   [services.production]
   run = ["bash", "/home/runner/workspace/start.sh"]
+
+  [services.production.health.startup]
+  path = "/novnc/vnc.html"
   

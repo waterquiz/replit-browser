@@ -208,14 +208,25 @@ PYEOF
 echo "[5/6] Starting x11vnc on port ${VNC_PORT}..."
 if [ -n "$VNC_PASSWORD" ]; then
     x11vnc -display "${DISPLAY}" -rfbport "${VNC_PORT}" \
-        -passwd "${VNC_PASSWORD}" -forever -shared -bg \
-        -o /tmp/x11vnc.log 2>/dev/null
+        -passwd "${VNC_PASSWORD}" -forever -shared >> /tmp/x11vnc.log 2>&1 &
 else
     x11vnc -display "${DISPLAY}" -rfbport "${VNC_PORT}" \
-        -nopw -forever -shared -bg \
-        -o /tmp/x11vnc.log 2>/dev/null
+        -nopw -forever -shared >> /tmp/x11vnc.log 2>&1 &
 fi
-sleep 2
+
+# Verify x11vnc is actually listening
+for i in 1 2 3 4 5; do
+    sleep 2
+    if nc -z localhost "${VNC_PORT}" 2>/dev/null; then
+        echo "x11vnc listening on port ${VNC_PORT} ✓"
+        break
+    fi
+    echo "Waiting for x11vnc... attempt $i"
+    if [ "$i" -eq 5 ]; then
+        echo "ERROR: x11vnc failed to start. Log:"
+        cat /tmp/x11vnc.log 2>/dev/null | tail -20
+    fi
+done
 
 # 6. Start noVNC/websockify on dedicated port
 echo "[6/6] Starting noVNC websockify on port ${NOVNC_PORT}..."
