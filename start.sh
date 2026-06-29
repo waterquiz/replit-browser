@@ -123,6 +123,11 @@ fi
 
 # 4. Launch Chromium with the default URL
 echo "[4/6] Launching Chromium..."
+# Remove stale profile locks that block startup (e.g. after crash or cross-machine reuse)
+rm -f "${CHROME_PROFILE}/SingletonLock" \
+      "${CHROME_PROFILE}/SingletonCookie" \
+      "${CHROME_PROFILE}/SingletonSocket" \
+      "${CHROME_PROFILE}/Default/.parentlock" 2>/dev/null || true
 DEFAULT_URL="${BROWSER_URL:-https://www.google.com}"
 chromium \
     --no-sandbox \
@@ -208,10 +213,12 @@ PYEOF
 echo "[5/6] Starting x11vnc on port ${VNC_PORT}..."
 if [ -n "$VNC_PASSWORD" ]; then
     x11vnc -display "${DISPLAY}" -rfbport "${VNC_PORT}" \
-        -passwd "${VNC_PASSWORD}" -forever -shared >> /tmp/x11vnc.log 2>&1 &
+        -passwd "${VNC_PASSWORD}" -forever -shared -bg \
+        -o /tmp/x11vnc.log 2>/dev/null
 else
     x11vnc -display "${DISPLAY}" -rfbport "${VNC_PORT}" \
-        -nopw -forever -shared >> /tmp/x11vnc.log 2>&1 &
+        -nopw -forever -shared -bg \
+        -o /tmp/x11vnc.log 2>/dev/null
 fi
 
 # Verify x11vnc is actually listening
@@ -223,8 +230,8 @@ for i in 1 2 3 4 5; do
     fi
     echo "Waiting for x11vnc... attempt $i"
     if [ "$i" -eq 5 ]; then
-        echo "ERROR: x11vnc failed to start. Log:"
-        cat /tmp/x11vnc.log 2>/dev/null | tail -20
+        echo "ERROR: x11vnc failed to start. Full log:"
+        cat /tmp/x11vnc.log 2>/dev/null
     fi
 done
 
