@@ -1,0 +1,1 @@
+- [Chromium MV2 extension flags](chromium-mv2-flags.md) — correct --allow-legacy-mv2-extensions + feature flags to keep MV2 extensions alive in Chromium 138+
